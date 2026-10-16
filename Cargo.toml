@@ -12,8 +12,9 @@ critical-section = "1.2"
 resident-fat = { version = "0.3.1", default-features = false }
 # The chip feature selects the SoC's peripheral memory map. None is a
 # default, because there is no sensible default chip; this one is for the
-# Raspberry Pi 2 (B).
-rpi-hal = { version = "0.9", features = ["bcm2837"] }
+# Raspberry Pi 2 (B). `multicore` for the audio core (src/audio.rs); it
+# also makes `critical-section` a lock across cores.
+rpi-hal = { version = "0.9", features = ["bcm2837", "multicore"] }
 # The bring-up every board does: the console and `logln!`, the global
 # heap, and mounting the SD card, which is where the WAD is read from.
 # Each capability is a feature (heap, config, storage, net, web, ota,
@@ -33,3 +34,10 @@ panic = "abort"
 [build-dependencies]
 # Compiles the doomgeneric C engine (see build.rs).
 cc = "1.8.0"
+
+# TEMPORARY: rpi-hal with the re-entrant multicore critical section,
+# which the audio core needs (without it the engine's first printf hangs).
+# Needs rpi-hal checked out beside this repo. Comes out, for a crates.io
+# release, once the audio issues (#2, #7, #8) are done.
+[patch.crates-io]
+rpi-hal = { path = "../rpi-hal/hal" }

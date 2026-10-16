@@ -5,12 +5,13 @@
 //!
 //! Boots on rpi-hal, starts rpi-kickstart's console on the UART
 //! (GPIO14/15, 115200 8N1), mounts the SD card for the C library the
-//! engine runs on (see `newlib`), sets up the display and a USB
-//! keyboard, and runs the doomgeneric engine, which finds its WAD in
-//! `doom/` on the card.
+//! engine runs on (see `newlib`), starts audio on core 1, sets up the
+//! display and a USB keyboard, and runs the doomgeneric engine, which
+//! finds its WAD in `doom/` on the card.
 
 extern crate alloc;
 
+mod audio;
 mod files;
 mod input;
 mod newlib;
@@ -98,6 +99,12 @@ pub extern "C" fn kmain() -> ! {
         Err(e) => logln!("card: no SD card ({e:?})"),
     }
 
+    // After the card: see `audio::start`.
+    // Safety: the only place the secondary cores are taken.
+    let cores = unsafe { rpi_hal::multicore::Cores::steal() };
+    audio::start(cores.core1);
+    logln!("audio: core 1, {} Hz", audio::sample_rate_hz());
+
     input::init(
         peripherals.USB_OTG_GLOBAL,
         peripherals.USB_OTG_HOST,
@@ -161,6 +168,9 @@ pub extern "C" fn kmain() -> ! {
     // and lives for the rest of the program.
     unsafe {
         doomgeneric_Create(1, argv.as_mut_ptr());
+        // Through startup, including the WAD load: a count well short of
+        // the uptime's worth of chunks means the stream stopped.
+        logln!("audio: {} chunks played", audio::chunks());
         loop {
             doomgeneric_Tick();
         }
