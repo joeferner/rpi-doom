@@ -18,9 +18,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#if defined(FEATURE_SOUND) && !defined(__DJGPP__)
-#include <SDL_mixer.h>
-#endif
+// rpi-doom: no SDL_mixer include. Nothing in this file uses it, and the
+// sound module here (c/i_rpisound.c) isn't SDL's.
 
 #include "config.h"
 #include "doomfeatures.h"

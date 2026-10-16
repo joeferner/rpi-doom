@@ -11,6 +11,11 @@ use std::process::Command;
 
 const ENGINE_DIR: &str = "doomgeneric/doomgeneric";
 
+/// This board's C, compiled with the engine: its sound and music modules,
+/// which need the engine's headers and WAD functions.
+const OUR_C_DIR: &str = "c";
+const OUR_SOURCES: &[&str] = &["i_rpisound.c"];
+
 /// The engine's sources: upstream's Makefile list without its X11
 /// platform file (`doomgeneric_xlib.c`). The platform layer for this
 /// board, the `DG_*` functions, is written in Rust.
@@ -118,11 +123,18 @@ fn main() {
     }
     build
         .files(SOURCES.iter().map(|source| dir.join(source)))
+        .files(
+            OUR_SOURCES
+                .iter()
+                .map(|source| Path::new(OUR_C_DIR).join(source)),
+        )
         .include(dir)
         .flag("-ffunction-sections")
         .flag("-fdata-sections")
         .define("NORMALUNIX", None)
         .define("_DEFAULT_SOURCE", None)
+        // Sound and music modules: ours, in c/i_rpisound.c.
+        .define("FEATURE_SOUND", None)
         // 1997 code: these are noise, not anything to act on here.
         .flag("-Wno-unused-parameter")
         .flag("-Wno-sign-compare")
@@ -140,6 +152,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=m");
 
     println!("cargo:rerun-if-changed={ENGINE_DIR}");
+    println!("cargo:rerun-if-changed={OUR_C_DIR}");
 }
 
 /// The directory holding the `libc.a` that matches [`ARCH_FLAGS`].

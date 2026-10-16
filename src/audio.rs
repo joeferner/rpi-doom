@@ -6,9 +6,9 @@
 //! which matters because Doom's tics are uneven: a frame that runs long,
 //! or a level load that stalls core 0 for a second, can't starve it.
 //!
-//! For now the samples are a quiet test tone. Sound effects (#7) replace
-//! [`Source`] with a mixer whose channel state core 0 updates; core 1 goes
-//! on pulling from it the same way.
+//! The samples come from the sound-effects mixer (src/sound.rs): core 0
+//! only says which sounds are playing on which channels, and core 1 mixes
+//! them here, a chunk at a time.
 //!
 //! # How the samples reach the pins
 //!
@@ -30,6 +30,8 @@ use rpi_hal::dma::Dma;
 use rpi_hal::multicore::{CacheAligned, Core1, Stack};
 use rpi_hal::pwm::{Channel1Pin, Channel2Pin, Pwm, pcm_to_duty};
 use rpi_hal::{halt, pac};
+
+use crate::sound::Mixer;
 
 /// Duty range a sample is expressed in, and so the bit depth: 10 bits.
 ///
@@ -59,13 +61,6 @@ const CHUNK_FRAMES: usize = 256;
 
 /// Words per chunk: one per channel per frame.
 const CHUNK_WORDS: usize = CHUNK_FRAMES * 2;
-
-/// The test tone's pitch: A above middle C.
-const TONE_HZ: u32 = 440;
-
-/// The test tone's peak, out of `i16::MAX`: about -18 dB, audible without
-/// being unpleasant through headphones.
-const TONE_PEAK: i32 = 4096;
 
 /// Core 1's stack. The fill loop is flat and its buffers are `static`.
 static mut CORE1_STACK: Stack<0x4000> = Stack::new();
@@ -110,47 +105,19 @@ pub fn start(core1: Core1) {
     unsafe { core1.spawn(&mut *addr_of_mut!(CORE1_STACK), worker) };
 }
 
-/// Where samples come from. A test tone until there is a mixer.
-struct Source {
-    /// Position in the tone's period, as a fraction of `rate`.
-    phase: u32,
-    rate: u32,
-}
-
-impl Source {
-    /// The next stereo frame, as signed 16-bit left and right.
-    ///
-    /// A triangle rather than a sine: `core` has no `sin`, and a test tone
-    /// only has to be steady enough that a gap or click stands out.
-    fn next(&mut self) -> (i16, i16) {
-        // Triangle over one period: up from -peak to +peak, then back.
-        let half = self.rate / 2;
-        let ramp = if self.phase < half {
-            self.phase
-        } else {
-            self.rate - self.phase
-        };
-        let sample = (ramp as i64 * 4 * TONE_PEAK as i64 / self.rate as i64) as i32 - TONE_PEAK;
-        self.phase += TONE_HZ;
-        if self.phase >= self.rate {
-            self.phase -= self.rate;
-        }
-        let sample = sample as i16;
-        (sample, sample)
+/// Fills one chunk with [`CHUNK_FRAMES`] interleaved frames from the
+/// mixer.
+fn fill(mixer: &mut Mixer, buf: &mut [u32]) {
+    let mut frames = [[0i16; 2]; CHUNK_FRAMES];
+    mixer.mix(&mut frames);
+    for (words, frame) in buf.as_chunks_mut::<2>().0.iter_mut().zip(&frames) {
+        words[0] = u32::from(pcm_to_duty(frame[0], RANGE));
+        words[1] = u32::from(pcm_to_duty(frame[1], RANGE));
     }
-
-    /// Fills one chunk with [`CHUNK_FRAMES`] interleaved frames.
-    fn fill(&mut self, buf: &mut [u32]) {
-        for frame in buf.as_chunks_mut::<2>().0 {
-            let (left, right) = self.next();
-            frame[0] = u32::from(pcm_to_duty(left, RANGE));
-            frame[1] = u32::from(pcm_to_duty(right, RANGE));
-        }
-        CHUNKS.0.store(
-            CHUNKS.0.load(Ordering::Relaxed).wrapping_add(1),
-            Ordering::Relaxed,
-        );
-    }
+    CHUNKS.0.store(
+        CHUNKS.0.load(Ordering::Relaxed).wrapping_add(1),
+        Ordering::Relaxed,
+    );
 }
 
 /// The audio worker: owns the PWM and the DMA channel feeding it, and keeps
@@ -180,12 +147,9 @@ extern "C" fn worker() -> ! {
 
     // Both chunks hold real audio before the engine starts: it reads the
     // moment the stream is armed.
-    let mut source = Source {
-        phase: 0,
-        rate: sample_rate_hz(),
-    };
-    source.fill(&mut buf0.0);
-    source.fill(&mut buf1.0);
+    let mut mixer = Mixer::new();
+    fill(&mut mixer, &mut buf0.0);
+    fill(&mut mixer, &mut buf1.0);
 
     let mut dma = Dma::new();
     // Parking is the right failure for both of these: the game runs on
@@ -203,7 +167,7 @@ extern "C" fn worker() -> ! {
 
     loop {
         // Blocks until the engine is done with the chunk being refilled.
-        stream.feed(|buf| source.fill(buf));
+        stream.feed(|buf| fill(&mut mixer, buf));
         // A channel that flagged an error has stopped, and a stopped
         // channel is what paces this loop, so carrying on would spin.
         if stream.is_error() {

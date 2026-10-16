@@ -16,6 +16,7 @@ mod files;
 mod input;
 mod newlib;
 mod platform;
+mod sound;
 
 use core::ffi::{c_char, c_int};
 use core::fmt::Write;
@@ -102,6 +103,7 @@ pub extern "C" fn kmain() -> ! {
     // After the card: see `audio::start`.
     // Safety: the only place the secondary cores are taken.
     let cores = unsafe { rpi_hal::multicore::Cores::steal() };
+    sound::set_output_rate(audio::sample_rate_hz());
     audio::start(cores.core1);
     logln!("audio: core 1, {} Hz", audio::sample_rate_hz());
 
