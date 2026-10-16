@@ -84,6 +84,11 @@ place of the loader's `kernel7.img`.
 Letters are passed through as typed, so the menus' y/n prompts and the
 cheat codes work.
 
+There's no key-binding menu, as in the original. To rebind, edit the
+`key_*` lines in `doom/default.cfg`; the values are DOS keyboard
+scancodes (e.g. `key_fire 29` is Ctrl, `key_use 57` is Space, `key_up 17`
+is W). A `DEFAULT.CFG` from DOS Doom works as-is.
+
 Settings are saved to `doom/default.cfg` on the card when you quit from
 the menu (Esc, Quit Game), as in the original; turning the board off
 without quitting loses changes made since the last quit. Saving games

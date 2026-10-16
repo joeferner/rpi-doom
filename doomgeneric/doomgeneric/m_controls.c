@@ -30,10 +30,14 @@ int key_right = KEY_RIGHTARROW;
 int key_left = KEY_LEFTARROW;
 int key_up = KEY_UPARROW;
 int key_down = KEY_DOWNARROW; 
-int key_strafeleft = KEY_STRAFE_L;
-int key_straferight = KEY_STRAFE_R;
-int key_fire = KEY_FIRE;
-int key_use = KEY_USE;
+// rpi-doom: vanilla's bindings, not doomgeneric's KEY_STRAFE_L/R and
+// KEY_FIRE/KEY_USE. Those are actions with no DOS scancode, so they can't
+// be saved to default.cfg and come back unbound; the keyboard sends the
+// keys themselves.
+int key_strafeleft = ',';
+int key_straferight = '.';
+int key_fire = KEY_RCTRL;
+int key_use = ' ';
 int key_strafe = KEY_RALT;
 int key_speed = KEY_RSHIFT; 
 

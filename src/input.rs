@@ -186,9 +186,9 @@ impl State {
 
         let modifiers = events.report().modifiers;
         for (was, is, code) in [
-            (self.modifiers.ctrl(), modifiers.ctrl(), KEY_FIRE),
+            (self.modifiers.ctrl(), modifiers.ctrl(), KEY_RCTRL),
             (self.modifiers.shift(), modifiers.shift(), KEY_RSHIFT),
-            (self.modifiers.alt(), modifiers.alt(), KEY_LALT),
+            (self.modifiers.alt(), modifiers.alt(), KEY_RALT),
         ] {
             if was != is {
                 self.push(is, code);
@@ -220,28 +220,42 @@ const KEY_RIGHTARROW: u8 = 0xae;
 const KEY_LEFTARROW: u8 = 0xac;
 const KEY_UPARROW: u8 = 0xad;
 const KEY_DOWNARROW: u8 = 0xaf;
-const KEY_STRAFE_L: u8 = 0xa0;
-const KEY_STRAFE_R: u8 = 0xa1;
-const KEY_USE: u8 = 0xa2;
-const KEY_FIRE: u8 = 0xa3;
 const KEY_ESCAPE: u8 = 27;
 const KEY_ENTER: u8 = 13;
 const KEY_TAB: u8 = 9;
 const KEY_BACKSPACE: u8 = 0x7f;
 const KEY_PAUSE: u8 = 0xff;
 const KEY_RSHIFT: u8 = 0x80 + 0x36;
-const KEY_LALT: u8 = 0x80 + 0x38;
+const KEY_RCTRL: u8 = 0x80 + 0x1d;
+const KEY_RALT: u8 = 0x80 + 0x38;
 const KEY_F1: u8 = 0x80 + 0x3b;
 const KEY_F11: u8 = 0x80 + 0x57;
 const KEY_F12: u8 = 0x80 + 0x58;
+const KEY_CAPSLOCK: u8 = 0x80 + 0x3a;
+const KEY_SCRLCK: u8 = 0x80 + 0x46;
+const KEY_PRTSCR: u8 = 0x80 + 0x59;
+const KEY_HOME: u8 = 0x80 + 0x47;
+const KEY_END: u8 = 0x80 + 0x4f;
+const KEY_PGUP: u8 = 0x80 + 0x49;
+const KEY_PGDN: u8 = 0x80 + 0x51;
+const KEY_INS: u8 = 0x80 + 0x52;
+const KEY_DEL: u8 = 0x80 + 0x53;
 
 /// The `doomkeys.h` code for a HID keyboard usage, or `None` for a key
 /// Doom has no use for.
 ///
-/// Follows doomgeneric's SDL port, which the engine's default bindings
-/// assume: Ctrl fires, Space uses, Shift runs, Alt strafes, and comma and
-/// period strafe left and right as in the original. Letters are lowercase
-/// ASCII, which the menus and cheat codes expect.
+/// Each key sends itself, never an action: Ctrl is `KEY_RCTRL`, not
+/// `KEY_FIRE`, and Space is `' '`, not `KEY_USE`. What a key does is the
+/// bindings' business (`key_fire`, `key_use`, ... in `default.cfg`),
+/// which are saved as DOS scancodes and read back through `m_config.c`'s
+/// `scantokey` table; every code here is one that table produces, so any
+/// key can be bound and the binding survives a save. The engine's
+/// defaults are vanilla's: Ctrl fires, Space uses, Shift runs, Alt
+/// strafes, and `,` `.` strafe.
+///
+/// Letters are lowercase ASCII, which the menus and cheat codes expect.
+/// The keypad sends what `doomkeys.h`'s `KEYP_*` names, which is what it
+/// did with Num Lock off on DOS: arrows, Home/End/PgUp/PgDn, operators.
 fn doom_key(usage: u8) -> Option<u8> {
     Some(match usage {
         // a-z
@@ -253,20 +267,53 @@ fn doom_key(usage: u8) -> Option<u8> {
         0x29 => KEY_ESCAPE,
         0x2a => KEY_BACKSPACE,
         0x2b => KEY_TAB,
-        0x2c => KEY_USE,
+        0x2c => b' ',
         0x2d => b'-',
         0x2e => b'=',
-        0x36 => KEY_STRAFE_L,
-        0x37 => KEY_STRAFE_R,
+        0x2f => b'[',
+        0x30 => b']',
+        0x31 => b'\\',
+        0x33 => b';',
+        0x34 => b'\'',
+        0x35 => b'`',
+        0x36 => b',',
+        0x37 => b'.',
+        0x38 => b'/',
+        0x39 => KEY_CAPSLOCK,
         // F1-F10 are consecutive in both; F11 and F12 aren't.
         0x3a..=0x43 => KEY_F1 + (usage - 0x3a),
         0x44 => KEY_F11,
         0x45 => KEY_F12,
+        0x46 => KEY_PRTSCR,
+        0x47 => KEY_SCRLCK,
         0x48 => KEY_PAUSE,
+        0x49 => KEY_INS,
+        0x4a => KEY_HOME,
+        0x4b => KEY_PGUP,
+        0x4c => KEY_DEL,
+        0x4d => KEY_END,
+        0x4e => KEY_PGDN,
         0x4f => KEY_RIGHTARROW,
         0x50 => KEY_LEFTARROW,
         0x51 => KEY_DOWNARROW,
         0x52 => KEY_UPARROW,
+        // Keypad. (Num Lock itself is left out: `scantokey` has no
+        // scancode for it, so a binding to it couldn't be saved.)
+        0x54 => b'/',
+        0x55 => b'*',
+        0x56 => b'-',
+        0x57 => b'+',
+        0x58 => KEY_ENTER,
+        0x59 => KEY_END,
+        0x5a => KEY_DOWNARROW,
+        0x5b => KEY_PGDN,
+        0x5c => KEY_LEFTARROW,
+        0x5d => b'5',
+        0x5e => KEY_RIGHTARROW,
+        0x5f => KEY_HOME,
+        0x60 => KEY_UPARROW,
+        0x61 => KEY_PGUP,
+        0x67 => b'=',
         _ => return None,
     })
 }
