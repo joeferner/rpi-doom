@@ -81,16 +81,13 @@ pub extern "C" fn _sbrk(increment: isize) -> *mut c_void {
     }
 }
 
-/// Opens `path`. Only reading is supported.
+/// Opens `path` with `flags` (see `files::open`). FAT has no permission
+/// bits, so `mode` goes unused.
 #[unsafe(no_mangle)]
 pub extern "C" fn _open(path: *const c_char, flags: c_int, _mode: c_int) -> c_int {
-    const O_ACCMODE: c_int = 3;
-    if flags & O_ACCMODE != 0 {
-        return fail(Errno::ReadOnly);
-    }
     // Safety: newlib passes the caller's NUL-terminated path.
     let path = unsafe { CStr::from_ptr(path) };
-    files::open(path.to_bytes()).unwrap_or_else(fail)
+    files::open(path.to_bytes(), flags).unwrap_or_else(fail)
 }
 
 /// Reads up to `len` bytes from `fd` into `buf`.
@@ -111,24 +108,26 @@ pub extern "C" fn _read(fd: c_int, buf: *mut c_char, len: c_int) -> c_int {
     }
 }
 
-/// Writes `len` bytes of `buf` to `fd`. Only stdout and stderr, which
-/// both go to the console.
+/// Writes `len` bytes of `buf` to `fd`: stdout and stderr go to the
+/// console, anything from 3 up to a file on the card.
 #[unsafe(no_mangle)]
 pub extern "C" fn _write(fd: c_int, buf: *const c_char, len: c_int) -> c_int {
-    if fd != 1 && fd != 2 {
-        return fail(if fd >= 3 {
-            Errno::ReadOnly
-        } else {
-            Errno::BadFd
-        });
-    }
     let Ok(len) = usize::try_from(len) else {
         return fail(Errno::Invalid);
     };
     // Safety: newlib passes a buffer of at least `len` bytes.
     let bytes = unsafe { core::slice::from_raw_parts(buf.cast::<u8>(), len) };
-    console_write(bytes);
-    len as c_int
+    match fd {
+        1 | 2 => {
+            console_write(bytes);
+            len as c_int
+        }
+        3.. => match files::write(fd, bytes) {
+            Ok(written) => written as c_int,
+            Err(errno) => fail(errno),
+        },
+        _ => fail(Errno::BadFd),
+    }
 }
 
 /// Moves `fd`'s position.
@@ -220,8 +219,8 @@ pub extern "C" fn _exit(status: c_int) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn _fini() {}
 
-/// Creating a directory is a write, and nothing here writes yet. Doom
-/// tries this for its savegame directory and carries on without it.
+/// Making directories isn't supported yet; refused. Doom tries this for
+/// its config and savegame directories and carries on without them.
 ///
 /// Not `_mkdir`: newlib has no `mkdir` of its own to wrap one.
 #[unsafe(no_mangle)]
@@ -229,14 +228,14 @@ pub extern "C" fn mkdir(_path: *const c_char, _mode: c_int) -> c_int {
     fail(Errno::ReadOnly)
 }
 
-/// Deleting a file (`remove`) is a write; refused.
+/// Deleting a file (`remove`) isn't supported yet; refused.
 #[unsafe(no_mangle)]
 pub extern "C" fn _unlink(_path: *const c_char) -> c_int {
     fail(Errno::ReadOnly)
 }
 
-/// Linking a file, which is how newlib's `rename` works, is a write;
-/// refused.
+/// Linking a file, which is how newlib's `rename` works, isn't supported
+/// yet; refused.
 #[unsafe(no_mangle)]
 pub extern "C" fn _link(_old: *const c_char, _new: *const c_char) -> c_int {
     fail(Errno::ReadOnly)

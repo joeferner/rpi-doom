@@ -82,4 +82,9 @@ place of the loader's `kernel7.img`.
 | Pause | Pause |
 
 Letters are passed through as typed, so the menus' y/n prompts and the
-cheat codes work. Saving games and settings doesn't work yet.
+cheat codes work.
+
+Settings are saved to `doom/default.cfg` on the card when you quit from
+the menu (Esc, Quit Game), as in the original; turning the board off
+without quitting loses changes made since the last quit. Saving games
+doesn't work yet.

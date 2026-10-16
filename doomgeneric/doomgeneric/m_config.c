@@ -1608,7 +1608,8 @@ static const int scantokey[128] =
 
 static void SaveDefaultCollection(default_collection_t *collection)
 {
-#if ORIGCODE
+    // rpi-doom: enabled. doomgeneric compiles this out with ORIGCODE,
+    // which also guards platform code that has to stay out.
     default_t *defaults;
     int i, v;
     FILE *f;
@@ -1708,7 +1709,6 @@ static void SaveDefaultCollection(default_collection_t *collection)
     }
 
     fclose (f);
-#endif
 }
 
 // Parses integer values in the configuration file
@@ -1770,7 +1770,7 @@ static void SetVariable(default_t *def, char *value)
 
 static void LoadDefaultCollection(default_collection_t *collection)
 {
-#if ORIGCODE
+    // rpi-doom: enabled; see SaveDefaultCollection.
     FILE *f;
     default_t *def;
     char defname[80];
@@ -1811,7 +1811,7 @@ static void LoadDefaultCollection(default_collection_t *collection)
         // Strip off trailing non-printable characters (\r characters
         // from DOS text files)
 
-        while (strlen(strparm) > 0 && !isprint(strparm[strlen(strparm)-1]))
+        while (strlen(strparm) > 0 && !isprint((unsigned char) strparm[strlen(strparm)-1]))
         {
             strparm[strlen(strparm)-1] = '\0';
         }
@@ -1828,7 +1828,6 @@ static void LoadDefaultCollection(default_collection_t *collection)
     }
 
     fclose (f);
-#endif
 }
 
 // Set the default filenames to use for configuration files.
@@ -2042,11 +2041,11 @@ float M_GetFloatVariable(char *name)
 
 static char *GetDefaultConfigDir(void)
 {
-    char *result = (char *)malloc(2);
-    result[0] = '.';
-    result[1] = '\0';
-
-    return result;
+    // rpi-doom: the working directory, as "" rather than doomgeneric's
+    // ".". The config file name is joined straight onto this with no
+    // separator, so "." made the config ".default.cfg". "" is also what
+    // vanilla Doom did: config and saves beside the WAD.
+    return strdup("");
 }
 
 // 

@@ -1,9 +1,11 @@
-//! The files newlib's `open`/`read`/`lseek`/`close` reach: an open-file
-//! table over the FAT volume on the SD card.
+//! The files newlib's `open`/`read`/`write`/`lseek`/`close` reach: an
+//! open-file table over the FAT volume on the SD card.
 //!
-//! Read-only for now. Doom reads its WAD and config through here; opening
-//! anything for writing fails with `EROFS`, which Doom treats as "no
-//! config saved" rather than an error.
+//! Files can be read, created, truncated and written. A file that was
+//! written is synced when it's closed: resident-fat keeps allocation-table
+//! changes in memory until then, so closing is what puts a written file
+//! on the card for good. Deleting, renaming and making directories aren't
+//! here yet.
 //!
 //! # Paths
 //!
@@ -33,6 +35,13 @@ const FIRST_FD: i32 = 3;
 /// The longest path accepted, after joining it onto [`HOME`].
 const MAX_PATH: usize = 128;
 
+// newlib's `open` flags for `arm-none-eabi`, from its `<sys/_default_fcntl.h>`.
+const O_ACCMODE: i32 = 3;
+const O_APPEND: i32 = 0x0008;
+const O_CREAT: i32 = 0x0200;
+const O_TRUNC: i32 = 0x0400;
+const O_EXCL: i32 = 0x0800;
+
 /// Why an operation failed, as the `errno` value newlib expects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
@@ -45,19 +54,45 @@ pub enum Errno {
     BadFd = 9,
     /// The C heap is used up.
     NoMemory = 12,
+    /// `O_CREAT | O_EXCL` on a file that's already there.
+    Exists = 17,
     /// A bad argument: a negative seek, an unknown `whence`.
     Invalid = 22,
     /// Every slot in the table is in use.
     TooManyOpen = 24,
+    /// The card is full.
+    NoSpace = 28,
     /// A seek on the console.
     NotSeekable = 29,
-    /// A write was asked for; nothing here writes yet.
+    /// An operation that isn't supported yet (deleting, renaming, making
+    /// directories), refused as if the card were read-only.
     ReadOnly = 30,
+}
+
+impl<E> From<resident_fat::Error<E>> for Errno {
+    fn from(error: resident_fat::Error<E>) -> Self {
+        match error {
+            resident_fat::Error::NotFound { .. }
+            | resident_fat::Error::NotADirectory { .. }
+            | resident_fat::Error::IsADirectory { .. } => Errno::NoEntry,
+            resident_fat::Error::AlreadyExists { .. } => Errno::Exists,
+            resident_fat::Error::Fat(resident_fat::FatError::DiskFull { .. })
+            | resident_fat::Error::DirectoryFull => Errno::NoSpace,
+            resident_fat::Error::OutOfMemory { .. } => Errno::NoMemory,
+            _ => Errno::Io,
+        }
+    }
 }
 
 struct Open {
     file: File,
     position: u64,
+    /// Opened for writing (`O_WRONLY` or `O_RDWR`).
+    writable: bool,
+    /// `O_APPEND`: every write goes at the end, wherever the position is.
+    append: bool,
+    /// Written since it was opened, so closing it has to sync.
+    written: bool,
 }
 
 struct Table {
@@ -82,10 +117,14 @@ pub fn install(volume: Volume<SdBlockDevice<'static>>) {
     critical_section::with(|cs| TABLE.borrow_ref_mut(cs).volume = Some(volume));
 }
 
-/// Opens `path` for reading, returning its file descriptor.
-pub fn open(path: &[u8]) -> Result<i32, Errno> {
+/// Opens `path` with newlib's `open` `flags`, returning its file
+/// descriptor. `O_CREAT` creates a missing file, `O_TRUNC` empties an
+/// existing one opened for writing, and `O_EXCL` with `O_CREAT` refuses
+/// one that's already there.
+pub fn open(path: &[u8], flags: i32) -> Result<i32, Errno> {
     let mut joined = [0u8; MAX_PATH];
     let path = resolve(path, &mut joined)?;
+    let writable = flags & O_ACCMODE != 0;
     critical_section::with(|cs| {
         let table = &mut *TABLE.borrow_ref_mut(cs);
         let volume = table.volume.as_mut().ok_or(Errno::NoEntry)?;
@@ -94,14 +133,53 @@ pub fn open(path: &[u8]) -> Result<i32, Errno> {
             .iter()
             .position(Option::is_none)
             .ok_or(Errno::TooManyOpen)?;
-        let file = volume.open(path).map_err(|e| match e {
-            resident_fat::Error::NotFound { .. } | resident_fat::Error::IsADirectory { .. } => {
-                Errno::NoEntry
+
+        let mut written = false;
+        let file = match volume.open(path) {
+            Ok(_) if flags & O_CREAT != 0 && flags & O_EXCL != 0 => return Err(Errno::Exists),
+            Ok(mut file) => {
+                if writable && flags & O_TRUNC != 0 && !file.is_empty() {
+                    volume.truncate(&mut file, 0)?;
+                    written = true;
+                }
+                file
             }
-            _ => Errno::Io,
-        })?;
-        table.open[slot] = Some(Open { file, position: 0 });
+            Err(resident_fat::Error::NotFound { .. }) if flags & O_CREAT != 0 => {
+                written = true;
+                volume.create(path)?
+            }
+            Err(e) => return Err(e.into()),
+        };
+        table.open[slot] = Some(Open {
+            file,
+            position: 0,
+            writable,
+            append: flags & O_APPEND != 0,
+            written,
+        });
         Ok(FIRST_FD + slot as i32)
+    })
+}
+
+/// Writes `data` at the file's current position (or its end, for
+/// `O_APPEND`), advancing the position and growing the file as needed.
+pub fn write(fd: i32, data: &[u8]) -> Result<usize, Errno> {
+    critical_section::with(|cs| {
+        let table = &mut *TABLE.borrow_ref_mut(cs);
+        let open = slot(&mut table.open, fd)?;
+        if !open.writable {
+            return Err(Errno::BadFd);
+        }
+        let volume = table.volume.as_mut().ok_or(Errno::BadFd)?;
+        if open.append {
+            open.position = u64::from(open.file.len());
+        }
+        // Marked before the write, so a write that fails partway still
+        // gets its allocation-table changes synced on close.
+        open.written = true;
+        volume.write_at(&mut open.file, open.position, data)?;
+        open.position += data.len() as u64;
+        Ok(data.len())
     })
 }
 
@@ -112,9 +190,7 @@ pub fn read(fd: i32, into: &mut [u8]) -> Result<usize, Errno> {
         let table = &mut *TABLE.borrow_ref_mut(cs);
         let open = slot(&mut table.open, fd)?;
         let volume = table.volume.as_mut().ok_or(Errno::BadFd)?;
-        let read = volume
-            .read_at(&open.file, open.position, into)
-            .map_err(|_| Errno::Io)?;
+        let read = volume.read_at(&open.file, open.position, into)?;
         open.position += read as u64;
         Ok(read)
     })
@@ -147,12 +223,16 @@ pub fn len(fd: i32) -> Result<u32, Errno> {
     })
 }
 
-/// Closes the file, freeing its descriptor.
+/// Closes the file, freeing its descriptor, and syncs the card if it was
+/// written. The descriptor is freed even if the sync fails.
 pub fn close(fd: i32) -> Result<(), Errno> {
     critical_section::with(|cs| {
         let table = &mut *TABLE.borrow_ref_mut(cs);
-        slot(&mut table.open, fd)?;
+        let written = slot(&mut table.open, fd)?.written;
         table.open[(fd - FIRST_FD) as usize] = None;
+        if written {
+            table.volume.as_mut().ok_or(Errno::BadFd)?.sync()?;
+        }
         Ok(())
     })
 }
