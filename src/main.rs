@@ -40,11 +40,6 @@ static TIMER: StaticCell<Timer> = StaticCell::new();
 /// rest is newlib's own buffers and the engine's smaller allocations.
 const C_HEAP_BYTES: usize = 32 * 1024 * 1024;
 
-/// The size to draw at when the firmware has no display mode to report,
-/// e.g. when nothing was plugged in at boot.
-const FALLBACK_WIDTH: u32 = 640;
-const FALLBACK_HEIGHT: u32 = 480;
-
 unsafe extern "C" {
     /// Starts the engine: parses `argv`, finds and loads the WAD, and
     /// runs it up to its first tic.
@@ -111,13 +106,19 @@ pub extern "C" fn kmain() -> ! {
         timer,
     );
 
+    // The display's shape, at roughly Doom's size: the firmware scales the
+    // framebuffer to fill the display, which costs the CPU nothing, and
+    // the shape keeps that scaling from distorting the frame (see
+    // `platform::framebuffer_size`). Asking for the mode also clears any
+    // overscan border, which would otherwise shrink the picture on a TV.
     let (width, height) = match mailbox.display_mode() {
-        Ok(mode) => (mode.width, mode.height),
+        Ok(mode) => {
+            logln!("display: {}x{}", mode.width, mode.height);
+            platform::framebuffer_size(mode.width, mode.height)
+        }
         Err(e) => {
-            logln!(
-                "display: no mode from firmware ({e:?}), using {FALLBACK_WIDTH}x{FALLBACK_HEIGHT}"
-            );
-            (FALLBACK_WIDTH, FALLBACK_HEIGHT)
+            logln!("display: no mode from firmware ({e:?})");
+            (platform::WIDTH, platform::HEIGHT)
         }
     };
     // `Bgr` because a `0x00RRGGBB` word lands in memory on this
@@ -138,7 +139,7 @@ pub extern "C" fn kmain() -> ! {
                     platform::HEIGHT
                 );
             } else {
-                // Black, for the border around Doom's frame: the firmware
+                // Black, for the bars beside the frame: the firmware
                 // doesn't promise what a new buffer holds.
                 // Safety: `size_bytes` is the buffer the firmware just
                 // allocated.

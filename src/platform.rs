@@ -28,6 +28,30 @@ unsafe extern "C" {
 /// until then.
 static SCREEN: Mutex<Cell<Option<Framebuffer>>> = Mutex::new(Cell::new(None));
 
+/// The framebuffer size to ask for on a `width` x `height` display: the
+/// display's shape, just large enough to hold the [`WIDTH`] x [`HEIGHT`]
+/// frame.
+///
+/// The firmware scales the framebuffer to fill the display, so giving it
+/// the display's shape makes that scaling uniform and the frame keeps its
+/// proportions. The frame fills the framebuffer along one axis and is
+/// centered along the other, so the black bars are on two opposite
+/// sides only: left and right on a display wider than 8:5 (800x480,
+/// 16:9), top and bottom on a narrower one (4:3, 5:4), none on 16:10.
+pub fn framebuffer_size(width: u32, height: u32) -> (u32, u32) {
+    let (width, height) = (u64::from(width), u64::from(height));
+    let (frame_width, frame_height) = (u64::from(WIDTH), u64::from(HEIGHT));
+    if width * frame_height >= height * frame_width {
+        // Wider than the frame: frame height, display shape.
+        let scaled = (frame_height * width + height / 2) / height;
+        (scaled as u32, HEIGHT)
+    } else {
+        // Narrower: frame width, display shape.
+        let scaled = (frame_width * height + width / 2) / width;
+        (WIDTH, scaled as u32)
+    }
+}
+
 /// Sends the engine's frames to `framebuffer`, centered. It has to be at
 /// least [`WIDTH`] x [`HEIGHT`] and 32 bits per pixel.
 pub fn show_on(framebuffer: Framebuffer) {
@@ -51,8 +75,7 @@ pub extern "C" fn DG_DrawFrame() {
     let Some(screen) = critical_section::with(|cs| SCREEN.borrow(cs).get()) else {
         return;
     };
-    // Centered: on an 800x480 panel, an 80-pixel border left and right
-    // and 40 top and bottom.
+    // Centered; see `framebuffer_size`.
     let left = (screen.width - WIDTH) / 2;
     let top = (screen.height - HEIGHT) / 2;
     let pitch = screen.pitch_bytes as usize / 4;
