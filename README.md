@@ -91,5 +91,6 @@ is W). A `DEFAULT.CFG` from DOS Doom works as-is.
 
 Settings are saved to `doom/default.cfg` on the card when you quit from
 the menu (Esc, Quit Game), as in the original; turning the board off
-without quitting loses changes made since the last quit. Saving games
-doesn't work yet.
+without quitting loses changes made since the last quit. Saved games
+(F2 to save, F3 to load) are `doom/doomsav0.dsg` to `doomsav5.dsg`, and
+are written as soon as you save.

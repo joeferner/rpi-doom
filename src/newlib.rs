@@ -221,8 +221,8 @@ pub extern "C" fn _exit(status: c_int) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn _fini() {}
 
-/// Making directories isn't supported yet; refused. Doom tries this for
-/// its config and savegame directories and carries on without them.
+/// Making directories isn't supported; refused. Doom asks for its config
+/// directory, which is the working directory (`""`), and carries on.
 ///
 /// Not `_mkdir`: newlib has no `mkdir` of its own to wrap one.
 #[unsafe(no_mangle)]
@@ -230,17 +230,30 @@ pub extern "C" fn mkdir(_path: *const c_char, _mode: c_int) -> c_int {
     fail(Errno::ReadOnly)
 }
 
-/// Deleting a file (`remove`) isn't supported yet; refused.
+/// Deletes a file; what newlib's `remove` calls.
 #[unsafe(no_mangle)]
-pub extern "C" fn _unlink(_path: *const c_char) -> c_int {
-    fail(Errno::ReadOnly)
+pub extern "C" fn _unlink(path: *const c_char) -> c_int {
+    // Safety: newlib passes the caller's NUL-terminated path.
+    let path = unsafe { CStr::from_ptr(path) };
+    match files::remove(path.to_bytes()) {
+        Ok(()) => 0,
+        Err(errno) => fail(errno),
+    }
 }
 
-/// Linking a file, which is how newlib's `rename` works, isn't supported
-/// yet; refused.
+/// Renames `old` to `new`, replacing a file at `new`.
+///
+/// newlib's own `rename` is `_link` then `_unlink`, which FAT can't do:
+/// it has no hard links. Defining `rename` here keeps newlib's out of the
+/// link, and resident-fat renames in one step.
 #[unsafe(no_mangle)]
-pub extern "C" fn _link(_old: *const c_char, _new: *const c_char) -> c_int {
-    fail(Errno::ReadOnly)
+pub extern "C" fn rename(old: *const c_char, new: *const c_char) -> c_int {
+    // Safety: the caller passes NUL-terminated paths.
+    let (old, new) = unsafe { (CStr::from_ptr(old), CStr::from_ptr(new)) };
+    match files::rename(old.to_bytes(), new.to_bytes()) {
+        Ok(()) => 0,
+        Err(errno) => fail(errno),
+    }
 }
 
 /// There are no other processes to signal.

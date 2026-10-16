@@ -1,11 +1,12 @@
 //! The files newlib's `open`/`read`/`write`/`lseek`/`close` reach: an
 //! open-file table over the FAT volume on the SD card.
 //!
-//! Files can be read, created, truncated and written. A file that was
-//! written is synced when it's closed: resident-fat keeps allocation-table
-//! changes in memory until then, so closing is what puts a written file
-//! on the card for good. Deleting, renaming and making directories aren't
-//! here yet.
+//! Files can be read, created, truncated, written, deleted and renamed. A
+//! file that was written is synced when it's closed: resident-fat keeps
+//! allocation-table changes in memory until then, so closing is what puts
+//! a written file on the card for good. Deleting and renaming sync
+//! straight away. Making directories isn't here: nothing needs it, since
+//! the config and saves go beside the WAD.
 //!
 //! # Paths
 //!
@@ -18,8 +19,9 @@
 use core::cell::RefCell;
 
 use critical_section::Mutex;
-use resident_fat::File;
+use resident_fat::{BlockDevice, File};
 use rpi_hal::sd::SdBlockDevice;
+use rpi_kickstart::logln;
 use rpi_kickstart::storage::Volume;
 
 /// The card directory relative paths resolve against.
@@ -64,12 +66,12 @@ pub enum Errno {
     NoSpace = 28,
     /// A seek on the console.
     NotSeekable = 29,
-    /// An operation that isn't supported yet (deleting, renaming, making
-    /// directories), refused as if the card were read-only.
+    /// An operation that isn't supported (making directories), refused as
+    /// if the card were read-only.
     ReadOnly = 30,
 }
 
-impl<E> From<resident_fat::Error<E>> for Errno {
+impl<E: core::fmt::Debug> From<resident_fat::Error<E>> for Errno {
     fn from(error: resident_fat::Error<E>) -> Self {
         match error {
             resident_fat::Error::NotFound { .. }
@@ -79,13 +81,24 @@ impl<E> From<resident_fat::Error<E>> for Errno {
             resident_fat::Error::Fat(resident_fat::FatError::DiskFull { .. })
             | resident_fat::Error::DirectoryFull => Errno::NoSpace,
             resident_fat::Error::OutOfMemory { .. } => Errno::NoMemory,
-            _ => Errno::Io,
+            // Everything else is `EIO`, which says nothing about why;
+            // the console line does.
+            error => {
+                logln!("card: {error}");
+                Errno::Io
+            }
         }
     }
 }
 
+type Card = Volume<SdBlockDevice<'static>>;
+type CardError = resident_fat::Error<<SdBlockDevice<'static> as BlockDevice>::Error>;
+
 struct Open {
     file: File,
+    /// The resolved path, for reopening a handle that has gone stale.
+    path: [u8; MAX_PATH],
+    path_len: usize,
     position: u64,
     /// Opened for writing (`O_WRONLY` or `O_RDWR`).
     writable: bool,
@@ -95,8 +108,36 @@ struct Open {
     written: bool,
 }
 
+impl Open {
+    /// Runs `operation` on the file, reopening it by path and running it
+    /// once more if the handle has gone stale.
+    ///
+    /// resident-fat marks every handle into a directory stale whenever an
+    /// entry in that directory is deleted, siblings included: it can't
+    /// tell which slot a handle's file still owns, and leaves reopening to
+    /// the caller. Saving a game deletes in `doom/`, which without this
+    /// left the WAD's handle failing every read after the second save
+    /// into a slot. Reopening by name is right in the other case too,
+    /// where the file really was replaced: the name finds whichever file
+    /// has it now.
+    fn live<T>(
+        &mut self,
+        volume: &mut Card,
+        mut operation: impl FnMut(&mut Card, &mut File) -> Result<T, CardError>,
+    ) -> Result<T, Errno> {
+        match operation(volume, &mut self.file) {
+            Err(resident_fat::Error::StaleFile { .. }) => {
+                let path = core::str::from_utf8(&self.path[..self.path_len]).unwrap_or("");
+                self.file = volume.open(path)?;
+                Ok(operation(volume, &mut self.file)?)
+            }
+            result => Ok(result?),
+        }
+    }
+}
+
 struct Table {
-    volume: Option<Volume<SdBlockDevice<'static>>>,
+    volume: Option<Card>,
     open: [Option<Open>; MAX_OPEN],
 }
 
@@ -150,8 +191,12 @@ pub fn open(path: &[u8], flags: i32) -> Result<i32, Errno> {
             }
             Err(e) => return Err(e.into()),
         };
+        let mut stored = [0u8; MAX_PATH];
+        stored[..path.len()].copy_from_slice(path.as_bytes());
         table.open[slot] = Some(Open {
             file,
+            path: stored,
+            path_len: path.len(),
             position: 0,
             writable,
             append: flags & O_APPEND != 0,
@@ -171,14 +216,21 @@ pub fn write(fd: i32, data: &[u8]) -> Result<usize, Errno> {
             return Err(Errno::BadFd);
         }
         let volume = table.volume.as_mut().ok_or(Errno::BadFd)?;
-        if open.append {
-            open.position = u64::from(open.file.len());
-        }
         // Marked before the write, so a write that fails partway still
         // gets its allocation-table changes synced on close.
         open.written = true;
-        volume.write_at(&mut open.file, open.position, data)?;
-        open.position += data.len() as u64;
+        let (append, position) = (open.append, open.position);
+        let end = open.live(volume, |volume, file| {
+            // At the end for `O_APPEND`, read from the handle in use: a
+            // reopened one has the current length.
+            let at = if append {
+                u64::from(file.len())
+            } else {
+                position
+            };
+            volume.write_at(file, at, data).map(|()| at)
+        })?;
+        open.position = end + data.len() as u64;
         Ok(data.len())
     })
 }
@@ -190,7 +242,8 @@ pub fn read(fd: i32, into: &mut [u8]) -> Result<usize, Errno> {
         let table = &mut *TABLE.borrow_ref_mut(cs);
         let open = slot(&mut table.open, fd)?;
         let volume = table.volume.as_mut().ok_or(Errno::BadFd)?;
-        let read = volume.read_at(&open.file, open.position, into)?;
+        let position = open.position;
+        let read = open.live(volume, |volume, file| volume.read_at(file, position, into))?;
         open.position += read as u64;
         Ok(read)
     })
@@ -220,6 +273,40 @@ pub fn len(fd: i32) -> Result<u32, Errno> {
     critical_section::with(|cs| {
         let table = &mut *TABLE.borrow_ref_mut(cs);
         Ok(slot(&mut table.open, fd)?.file.len())
+    })
+}
+
+/// Deletes the file at `path`, and syncs the card.
+pub fn remove(path: &[u8]) -> Result<(), Errno> {
+    let mut joined = [0u8; MAX_PATH];
+    let path = resolve(path, &mut joined)?;
+    critical_section::with(|cs| {
+        let volume = &mut *TABLE.borrow_ref_mut(cs);
+        let volume = volume.volume.as_mut().ok_or(Errno::NoEntry)?;
+        volume.remove(path)?;
+        volume.sync()?;
+        Ok(())
+    })
+}
+
+/// Renames `from` to `to`, replacing a file already at `to`, and syncs
+/// the card.
+///
+/// resident-fat replaces in an order that leaves `to` naming a whole
+/// file, the old one or the new, whenever it's interrupted. That's what
+/// Doom relies on when it saves a game: it writes `temp.dsg` and renames
+/// it over the slot's file.
+pub fn rename(from: &[u8], to: &[u8]) -> Result<(), Errno> {
+    let mut joined_from = [0u8; MAX_PATH];
+    let mut joined_to = [0u8; MAX_PATH];
+    let from = resolve(from, &mut joined_from)?;
+    let to = resolve(to, &mut joined_to)?;
+    critical_section::with(|cs| {
+        let volume = &mut *TABLE.borrow_ref_mut(cs);
+        let volume = volume.volume.as_mut().ok_or(Errno::NoEntry)?;
+        volume.rename(from, to)?;
+        volume.sync()?;
+        Ok(())
     })
 }
 
