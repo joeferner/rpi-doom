@@ -1,0 +1,8 @@
+# Firmware settings for the Raspberry Pi 2 (B). The VideoCore firmware reads
+# this before any ARM code runs, so it decides which kernel file is loaded
+# and in which mode.
+
+# Start in AArch32, so the firmware loads kernel7.img. A rev 1.1 board
+# has no other mode, but a rev 1.2 does.
+arm_64bit=0
+disable_splash=1

@@ -1,0 +1,12 @@
+# Plain `cargo build` targets the board rather than the host.
+[build]
+target = "armv7a-none-eabi"
+
+# The linker script comes from rpi-hal, which publishes it on the linker
+# search path as `rpi-link.x`, already linking at 0x8000 for this
+# target. Naming it is the whole step.
+#
+# Ignored outright if a `RUSTFLAGS` environment variable is set, and the
+# symptom is `undefined symbol: __bss_end`.
+[target.armv7a-none-eabi]
+rustflags = ["-C", "link-arg=-Trpi-link.x"]
