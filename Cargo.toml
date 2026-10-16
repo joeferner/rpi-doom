@@ -5,14 +5,18 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# Guards the open-file table the newlib syscalls share (src/files.rs).
+critical-section = "1.2"
+resident-fat = { version = "0.3", default-features = false }
 # The chip feature selects the SoC's peripheral memory map. None is a
 # default, because there is no sensible default chip; this one is for the
 # Raspberry Pi 2 (B).
 rpi-hal = { version = "0.9", features = ["bcm2837"] }
-# The bring-up every board does: here only the console and `logln!`. Each
-# capability is a feature (heap, config, storage, net, web, ota, ...);
-# see https://docs.rs/rpi-kickstart.
-rpi-kickstart = { version = "0.3", features = ["console"] }
+# The bring-up every board does: the console and `logln!`, the global
+# heap, and mounting the SD card, which is where the WAD is read from.
+# Each capability is a feature (heap, config, storage, net, web, ota,
+# ...); see https://docs.rs/rpi-kickstart.
+rpi-kickstart = { version = "0.3", features = ["console", "heap", "storage"] }
 # Hands the console a UART that outlives `kmain`'s stack, without a
 # `static mut`.
 static_cell = "2.1"
@@ -23,3 +27,7 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+
+[build-dependencies]
+# Compiles the doomgeneric C engine (see build.rs).
+cc = "1.8.0"

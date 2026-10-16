@@ -2,3 +2,4 @@
 # What `make sd-card` fetches. config.txt is this project's own.
 /sd-card/*
 !/sd-card/config.txt
+/doom

@@ -18,14 +18,19 @@ console on the UART and logs a heartbeat once a second.
 
 ## Set up the card, once
 
+The game data isn't in this repository: `DOOM.WAD` is commercial. Put a
+WAD (`DOOM.WAD`, `DOOM2.WAD`, or the shareware `DOOM1.WAD`) in a `doom/`
+directory here first; it's ignored by git.
+
 ```sh
 make sd-card
 ```
 
 This fetches the Raspberry Pi boot firmware and the
 [rpi-loader](https://github.com/joeferner/rpi-hal/tree/main/loader) image
-into `sd-card/`, checking each against `sd-card.sha256`. Copy everything
-in `sd-card/` onto the card's boot partition, including `config.txt`.
+into `sd-card/`, checking each against `sd-card.sha256`, and copies the
+WADs into `sd-card/doom/`. Copy everything in `sd-card/` onto the card's
+boot partition, including `config.txt` and the `doom` directory.
 
 The loader goes on the card as `kernel7.img`, the only filename the
 firmware loads on this board. It stays resident, so after this you never
