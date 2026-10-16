@@ -58,6 +58,17 @@ pub fn show_on(framebuffer: Framebuffer) {
     critical_section::with(|cs| SCREEN.borrow(cs).set(Some(framebuffer)));
 }
 
+/// Blanks the screen, for when the engine has stopped: otherwise its last
+/// frame stays up, which looks like a hang.
+pub fn blank() {
+    let Some(screen) = critical_section::with(|cs| SCREEN.borrow(cs).get()) else {
+        return;
+    };
+    // Safety: `size_bytes` is the whole buffer the firmware allocated.
+    unsafe { (screen.address as *mut u8).write_bytes(0, screen.size_bytes as usize) };
+    screen.flush();
+}
+
 /// The System Timer, for the clock functions. Its counters are read-only
 /// and free-running, so stealing it disturbs nothing.
 fn timer() -> Timer {

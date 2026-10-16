@@ -207,10 +207,12 @@ pub extern "C" fn _isatty(fd: c_int) -> c_int {
     c_int::from((0..=2).contains(&fd))
 }
 
-/// Ends the program. There is nothing to return to, so it stops here.
+/// Ends the program: Quit Game from the menu, or `I_Error`. There is
+/// nothing to return to, so it blanks the screen and stops here.
 #[unsafe(no_mangle)]
 pub extern "C" fn _exit(status: c_int) -> ! {
     logln!("exit({status})");
+    crate::platform::blank();
     rpi_hal::halt();
 }
 
