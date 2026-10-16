@@ -9,6 +9,8 @@ use rpi_hal::mailbox::Framebuffer;
 use rpi_hal::{pac, timer::Timer};
 use rpi_kickstart::logln;
 
+use crate::input;
+
 /// The engine's frame size: doomgeneric's default `DOOMGENERIC_RESX` x
 /// `DOOMGENERIC_RESY`, Doom's 320x200 doubled.
 pub const WIDTH: u32 = 640;
@@ -84,11 +86,18 @@ pub extern "C" fn DG_GetTicksMs() -> u32 {
 
 /// The next key event, if any: sets `*pressed` (1 down, 0 up) and `*key`
 /// (a `doomkeys.h` code) and returns 1, or returns 0 when there is none.
-///
-/// No keyboard yet, so never any; the engine plays its demo loop.
+/// The engine calls this until it returns 0, once per tic.
 #[unsafe(no_mangle)]
-pub extern "C" fn DG_GetKey(_pressed: *mut c_int, _key: *mut c_uchar) -> c_int {
-    0
+pub extern "C" fn DG_GetKey(pressed: *mut c_int, key: *mut c_uchar) -> c_int {
+    let Some(event) = input::next_key(&timer()) else {
+        return 0;
+    };
+    // Safety: the engine passes pointers to its own locals.
+    unsafe {
+        *pressed = c_int::from(event.pressed);
+        *key = event.code;
+    }
+    1
 }
 
 /// The engine names its "window" once it knows which game it's running.

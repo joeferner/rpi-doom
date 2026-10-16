@@ -5,12 +5,14 @@
 //!
 //! Boots on rpi-hal, starts rpi-kickstart's console on the UART
 //! (GPIO14/15, 115200 8N1), mounts the SD card for the C library the
-//! engine runs on (see `newlib`), sets up the display, and runs the
-//! doomgeneric engine, which finds its WAD in `doom/` on the card.
+//! engine runs on (see `newlib`), sets up the display and a USB
+//! keyboard, and runs the doomgeneric engine, which finds its WAD in
+//! `doom/` on the card.
 
 extern crate alloc;
 
 mod files;
+mod input;
 mod newlib;
 mod platform;
 
@@ -100,6 +102,14 @@ pub extern "C" fn kmain() -> ! {
         },
         Err(e) => logln!("card: no SD card ({e:?})"),
     }
+
+    input::init(
+        peripherals.USB_OTG_GLOBAL,
+        peripherals.USB_OTG_HOST,
+        peripherals.USB_OTG_PWRCLK,
+        &mut mailbox,
+        timer,
+    );
 
     let (width, height) = match mailbox.display_mode() {
         Ok(mode) => (mode.width, mode.height),
