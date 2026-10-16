@@ -19,7 +19,7 @@
 use core::cell::RefCell;
 
 use critical_section::Mutex;
-use resident_fat::{BlockDevice, File};
+use resident_fat::File;
 use rpi_hal::sd::SdBlockDevice;
 use rpi_kickstart::logln;
 use rpi_kickstart::storage::Volume;
@@ -91,14 +91,8 @@ impl<E: core::fmt::Debug> From<resident_fat::Error<E>> for Errno {
     }
 }
 
-type Card = Volume<SdBlockDevice<'static>>;
-type CardError = resident_fat::Error<<SdBlockDevice<'static> as BlockDevice>::Error>;
-
 struct Open {
     file: File,
-    /// The resolved path, for reopening a handle that has gone stale.
-    path: [u8; MAX_PATH],
-    path_len: usize,
     position: u64,
     /// Opened for writing (`O_WRONLY` or `O_RDWR`).
     writable: bool,
@@ -108,36 +102,8 @@ struct Open {
     written: bool,
 }
 
-impl Open {
-    /// Runs `operation` on the file, reopening it by path and running it
-    /// once more if the handle has gone stale.
-    ///
-    /// resident-fat marks every handle into a directory stale whenever an
-    /// entry in that directory is deleted, siblings included: it can't
-    /// tell which slot a handle's file still owns, and leaves reopening to
-    /// the caller. Saving a game deletes in `doom/`, which without this
-    /// left the WAD's handle failing every read after the second save
-    /// into a slot. Reopening by name is right in the other case too,
-    /// where the file really was replaced: the name finds whichever file
-    /// has it now.
-    fn live<T>(
-        &mut self,
-        volume: &mut Card,
-        mut operation: impl FnMut(&mut Card, &mut File) -> Result<T, CardError>,
-    ) -> Result<T, Errno> {
-        match operation(volume, &mut self.file) {
-            Err(resident_fat::Error::StaleFile { .. }) => {
-                let path = core::str::from_utf8(&self.path[..self.path_len]).unwrap_or("");
-                self.file = volume.open(path)?;
-                Ok(operation(volume, &mut self.file)?)
-            }
-            result => Ok(result?),
-        }
-    }
-}
-
 struct Table {
-    volume: Option<Card>,
+    volume: Option<Volume<SdBlockDevice<'static>>>,
     open: [Option<Open>; MAX_OPEN],
 }
 
@@ -191,12 +157,8 @@ pub fn open(path: &[u8], flags: i32) -> Result<i32, Errno> {
             }
             Err(e) => return Err(e.into()),
         };
-        let mut stored = [0u8; MAX_PATH];
-        stored[..path.len()].copy_from_slice(path.as_bytes());
         table.open[slot] = Some(Open {
             file,
-            path: stored,
-            path_len: path.len(),
             position: 0,
             writable,
             append: flags & O_APPEND != 0,
@@ -219,18 +181,11 @@ pub fn write(fd: i32, data: &[u8]) -> Result<usize, Errno> {
         // Marked before the write, so a write that fails partway still
         // gets its allocation-table changes synced on close.
         open.written = true;
-        let (append, position) = (open.append, open.position);
-        let end = open.live(volume, |volume, file| {
-            // At the end for `O_APPEND`, read from the handle in use: a
-            // reopened one has the current length.
-            let at = if append {
-                u64::from(file.len())
-            } else {
-                position
-            };
-            volume.write_at(file, at, data).map(|()| at)
-        })?;
-        open.position = end + data.len() as u64;
+        if open.append {
+            open.position = u64::from(open.file.len());
+        }
+        volume.write_at(&mut open.file, open.position, data)?;
+        open.position += data.len() as u64;
         Ok(data.len())
     })
 }
@@ -242,8 +197,7 @@ pub fn read(fd: i32, into: &mut [u8]) -> Result<usize, Errno> {
         let table = &mut *TABLE.borrow_ref_mut(cs);
         let open = slot(&mut table.open, fd)?;
         let volume = table.volume.as_mut().ok_or(Errno::BadFd)?;
-        let position = open.position;
-        let read = open.live(volume, |volume, file| volume.read_at(file, position, into))?;
+        let read = volume.read_at(&open.file, open.position, into)?;
         open.position += read as u64;
         Ok(read)
     })

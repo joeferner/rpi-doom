@@ -42,6 +42,14 @@ static wad_file_t *W_StdC_OpenFile(char *path)
         return NULL;
     }
 
+    // rpi-doom: unbuffered. Every read below is an fseek to a lump and an
+    // fread of exactly its length, and newlib's fread on an unbuffered
+    // stream reads straight into the caller's buffer in one call. Buffered,
+    // it refilled a fixed 1 KiB at a time from wherever the fseek landed
+    // (this newlib ignores st_blksize, and discards the buffer on every
+    // fseek), turning each lump into a string of small reads of the card.
+    setvbuf(fstream, NULL, _IONBF, 0);
+
     // Create a new stdc_wad_file_t to hold the file handle.
 
     result = Z_Malloc(sizeof(stdc_wad_file_t), PU_STATIC, 0);

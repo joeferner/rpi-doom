@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "resident-fat"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5778b62737f65c9a68a12406db200854dfda2ffcb5a548f24a03d6c1d0217dc0"
+checksum = "679d076043b55081e90cf41a3599da145ab5b75fc8162ae13711b1fb75ecc477"
 dependencies = [
  "thiserror",
 ]

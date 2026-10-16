@@ -7,7 +7,9 @@ publish = false
 [dependencies]
 # Guards the open-file table the newlib syscalls share (src/files.rs).
 critical-section = "1.2"
-resident-fat = { version = "0.3", default-features = false }
+# 0.3.1: handles survive deletes beside them (the WAD stays open while
+# saving), and small reads are one card command.
+resident-fat = { version = "0.3.1", default-features = false }
 # The chip feature selects the SoC's peripheral memory map. None is a
 # default, because there is no sensible default chip; this one is for the
 # Raspberry Pi 2 (B).
