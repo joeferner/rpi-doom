@@ -135,6 +135,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
+name = "nuked-opl3"
+version = "0.1.0"
+source = "git+https://github.com/joeferner/nuked-opl3-rs?branch=no-std#c3a13f94af4839cd16fd5b8aa18b8a143d21d259"
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -185,6 +190,7 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "critical-section",
+ "nuked-opl3",
  "resident-fat",
  "rpi-hal",
  "rpi-kickstart",

@@ -1,6 +1,6 @@
 // This board's OPL library: the `OPL_*` functions Chocolate Doom's music
 // module (chocolate-doom/i_oplmusic.c) is written against, on Nuked OPL3
-// (src/opl3.rs) rendered on core 1.
+// (the nuked-opl3 crate, through src/music.rs) rendered on core 1.
 //
 // In place of Chocolate Doom's opl/opl.c and its SDL driver. The shape is
 // the SDL driver's: the music module schedules callbacks ("in N us, play

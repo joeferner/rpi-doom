@@ -7,6 +7,9 @@ publish = false
 [dependencies]
 # Guards the open-file table the newlib syscalls share (src/files.rs).
 critical-section = "1.2"
+# The OPL3 chip the music plays on (src/music.rs). TEMPORARY: the git
+# branch until its no_std support (tgies/nuked-opl3-rs#1) is released.
+nuked-opl3 = { git = "https://github.com/joeferner/nuked-opl3-rs", branch = "no-std", default-features = false }
 # 0.3.1: handles survive deletes beside them (the WAD stays open while
 # saving), and small reads are one card command.
 resident-fat = { version = "0.3.1", default-features = false }

@@ -11,7 +11,8 @@ Rust.
 Sound effects and music play from the board's 3.5 mm jack, mixed on a
 core of their own. The music is the original OPL (Sound Blaster/AdLib)
 score: Chocolate Doom's OPL music player (`chocolate-doom/`) driving a
-Rust port of the Nuked OPL3 emulator (`src/opl3.rs`).
+Rust port of the Nuked OPL3 emulator
+([nuked-opl3](https://crates.io/crates/nuked-opl3)).
 
 ## What you need
 

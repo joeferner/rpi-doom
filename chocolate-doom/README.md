@@ -14,7 +14,7 @@ leaves this part out.
 
 Not copied: `opl/opl.c` and the drivers. This board's `OPL_*`
 implementation is `c/opl_rpi.c`, and the chip is Nuked OPL3 in Rust
-(`src/opl3.rs`), rendered on core 1.
+(the nuked-opl3 crate), rendered on core 1.
 
 Every change from upstream is marked `rpi-doom:` in the source:
 

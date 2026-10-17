@@ -3,7 +3,8 @@
 //! Chocolate Doom's music module (chocolate-doom/i_oplmusic.c) turns songs
 //! into OPL register writes, through this board's `OPL_*` library
 //! (c/opl_rpi.c). That library keeps its state in C and calls down to here
-//! for the chip itself, Nuked OPL3 (src/opl3.rs), and for its lock.
+//! for the chip itself, Nuked OPL3 (the nuked-opl3 crate), and for its
+//! lock.
 //!
 //! # The lock
 //!
@@ -24,7 +25,8 @@ use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use alloc::boxed::Box;
 use rpi_hal::cpu::core_id;
 
-use crate::opl3::{self, Opl3Chip};
+use nuked_opl3::Opl3Chip;
+
 use crate::sound;
 
 /// The core holding the lock, or [`NO_OWNER`].
@@ -77,12 +79,12 @@ pub extern "C" fn rpi_doom_opl_unlock() {
 pub extern "C" fn rpi_doom_opl_reset() {
     let mut chip = CHIP.load(Ordering::Relaxed);
     if chip.is_null() {
-        chip = Box::into_raw(Box::new(Opl3Chip::default()));
+        chip = Box::into_raw(Box::new(Opl3Chip::new(sound::output_rate())));
         CHIP.store(chip, Ordering::Relaxed);
     }
     // Safety: under the lock, and the chip lives for the rest of the
     // program.
-    opl3::reset(unsafe { &mut *chip }, sound::output_rate());
+    unsafe { &mut *chip }.reset(sound::output_rate());
 }
 
 /// The rate the chip renders at: core 1's output rate.
@@ -100,7 +102,7 @@ pub extern "C" fn rpi_doom_opl_rate() -> u32 {
 pub extern "C" fn rpi_doom_opl_write(reg: u32, value: u32) {
     // Safety: under the lock; null before `rpi_doom_opl_reset`.
     if let Some(chip) = unsafe { CHIP.load(Ordering::Relaxed).as_mut() } {
-        opl3::write_reg_buffered(chip, reg as u16, value as u8);
+        chip.write_register_buffered(reg as u16, value as u8);
     }
 }
 
@@ -115,9 +117,8 @@ pub unsafe extern "C" fn rpi_doom_opl_generate(out: *mut i16, frames: u32) {
     let out = unsafe { core::slice::from_raw_parts_mut(out, 2 * frames as usize) };
     match unsafe { CHIP.load(Ordering::Relaxed).as_mut() } {
         Some(chip) => {
-            for frame in out.as_chunks_mut::<2>().0 {
-                opl3::generate_resampled(chip, frame);
-            }
+            // Only errs on an empty buffer: a zero-frame slice, nothing to do.
+            let _ = chip.generate_stream(out);
         }
         None => out.fill(0),
     }

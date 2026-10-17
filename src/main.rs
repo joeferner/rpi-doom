@@ -16,7 +16,6 @@ mod files;
 mod input;
 mod music;
 mod newlib;
-mod opl3;
 mod platform;
 mod sound;
 
