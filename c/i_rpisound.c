@@ -6,7 +6,7 @@
 // never moves or goes away while a channel is reading it, and nothing is
 // converted or copied.
 //
-// The music module does nothing yet (#8).
+// The music module is Chocolate Doom's OPL one, behind a lock (see below).
 
 #include <stddef.h>
 #include <stdint.h>
@@ -176,55 +176,90 @@ sound_module_t DG_sound_module = {
     CacheSounds,
 };
 
-// Music: nothing yet (#8). Init succeeds so the engine carries on, and
-// every song is "registered" and plays silently.
+// Music: Chocolate Doom's OPL music module (chocolate-doom/i_oplmusic.c),
+// with every call that touches playback state taken under the OPL lock.
+//
+// The module's callbacks run on core 1 and walk the same voices and
+// tracks that PlaySong, StopSong, the volume and pausing change on core 0.
+// Upstream locks only inside StopSong; the lock is re-entrant, so taking
+// it again around each call is safe and covers the rest.
+//
+// Two calls stay unlocked. Init loads the GENMIDI lump from the card, which
+// would hold core 1 off for the length of a read, and nothing is playing
+// yet. RegisterSong only parses a song into memory core 1 never sees
+// until PlaySong.
+
+// music_opl_module is declared in i_sound.h.
+void OPL_Lock(void);
+void OPL_Unlock(void);
 
 static boolean MusicInit(void)
 {
-    return true;
+    return music_opl_module.Init();
 }
 
 static void MusicShutdown(void)
 {
+    OPL_Lock();
+    music_opl_module.Shutdown();
+    OPL_Unlock();
 }
 
 static void SetMusicVolume(int volume)
 {
+    OPL_Lock();
+    music_opl_module.SetMusicVolume(volume);
+    OPL_Unlock();
 }
 
 static void PauseMusic(void)
 {
+    OPL_Lock();
+    music_opl_module.PauseMusic();
+    OPL_Unlock();
 }
 
 static void ResumeMusic(void)
 {
+    OPL_Lock();
+    music_opl_module.ResumeMusic();
+    OPL_Unlock();
 }
 
 static void *RegisterSong(void *data, int len)
 {
-    // Non-null: a null handle reads as "couldn't register".
-    return data;
+    return music_opl_module.RegisterSong(data, len);
 }
 
 static void UnRegisterSong(void *handle)
 {
+    OPL_Lock();
+    music_opl_module.UnRegisterSong(handle);
+    OPL_Unlock();
 }
 
 static void PlaySong(void *handle, boolean looping)
 {
+    OPL_Lock();
+    music_opl_module.PlaySong(handle, looping);
+    OPL_Unlock();
 }
 
 static void StopSong(void)
 {
+    OPL_Lock();
+    music_opl_module.StopSong();
+    OPL_Unlock();
 }
 
 static boolean MusicIsPlaying(void)
 {
-    return false;
-}
+    boolean playing;
 
-static void Poll(void)
-{
+    OPL_Lock();
+    playing = music_opl_module.MusicIsPlaying();
+    OPL_Unlock();
+    return playing;
 }
 
 music_module_t DG_music_module = {
@@ -240,5 +275,6 @@ music_module_t DG_music_module = {
     PlaySong,
     StopSong,
     MusicIsPlaying,
-    Poll,
+    // The OPL module has nothing to poll: its callbacks run on core 1.
+    NULL,
 };

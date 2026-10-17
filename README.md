@@ -5,12 +5,19 @@ Doom on a bare-metal Raspberry Pi 2 (B): the
 [rpi-hal](https://crates.io/crates/rpi-hal) and
 [rpi-kickstart](https://crates.io/crates/rpi-kickstart), with no
 operating system. The engine is C, built against newlib; the layer under
-it (memory, files on the SD card, the display, the keyboard) is Rust.
+it (memory, files on the SD card, the display, the keyboard, sound) is
+Rust.
+
+Sound effects and music play from the board's 3.5 mm jack, mixed on a
+core of their own. The music is the original OPL (Sound Blaster/AdLib)
+score: Chocolate Doom's OPL music player (`chocolate-doom/`) driving a
+Rust port of the Nuked OPL3 emulator (`src/opl3.rs`).
 
 ## What you need
 
 - A display on HDMI or the DSI connector, and a USB keyboard. Plug both
   in before powering on.
+- Headphones or a speaker on the 3.5 mm jack, for sound.
 - A USB-to-serial cable (3.3 V): its RX on GPIO14 (pin 8), its TX on
   GPIO15 (pin 10), and ground on pin 6. The console runs at 115200 8N1.
 - An SD card with one FAT32 partition.
@@ -19,6 +26,9 @@ it (memory, files on the SD card, the display, the keyboard) is Rust.
   library.
 - Rust via [rustup](https://rustup.rs). `rust-toolchain.toml` installs
   the right toolchain and target on first build.
+- For now, a checkout of [rpi-hal](https://github.com/joeferner/rpi-hal)
+  beside this one (`../rpi-hal`): `Cargo.toml` patches it in for a
+  multicore fix that isn't released yet.
 - `cargo install cargo-binutils rpi-loader`: `cargo objcopy` turns the
   build into the raw image the firmware loads, and `rpi-loader` uploads
   it to the board.

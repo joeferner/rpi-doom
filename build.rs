@@ -11,10 +11,15 @@ use std::process::Command;
 
 const ENGINE_DIR: &str = "doomgeneric/doomgeneric";
 
-/// This board's C, compiled with the engine: its sound and music modules,
-/// which need the engine's headers and WAD functions.
+/// This board's C, compiled with the engine: its sound and music modules
+/// and its OPL library, which need the engine's headers and WAD functions.
 const OUR_C_DIR: &str = "c";
-const OUR_SOURCES: &[&str] = &["i_rpisound.c"];
+const OUR_SOURCES: &[&str] = &["i_rpisound.c", "opl_rpi.c"];
+
+/// OPL music playback from Chocolate Doom, which doomgeneric leaves out
+/// (see its README).
+const CHOCOLATE_DIR: &str = "chocolate-doom";
+const CHOCOLATE_SOURCES: &[&str] = &["i_oplmusic.c", "midifile.c", "opl_queue.c"];
 
 /// The engine's sources: upstream's Makefile list without its X11
 /// platform file (`doomgeneric_xlib.c`). The platform layer for this
@@ -46,6 +51,8 @@ const SOURCES: &[&str] = &[
     "i_system.c",
     "i_timer.c",
     "memio.c",
+    // MUS to MIDI, for the OPL music module.
+    "mus2mid.c",
     "m_argv.c",
     "m_bbox.c",
     "m_cheat.c",
@@ -128,7 +135,13 @@ fn main() {
                 .iter()
                 .map(|source| Path::new(OUR_C_DIR).join(source)),
         )
+        .files(
+            CHOCOLATE_SOURCES
+                .iter()
+                .map(|source| Path::new(CHOCOLATE_DIR).join(source)),
+        )
         .include(dir)
+        .include(CHOCOLATE_DIR)
         .flag("-ffunction-sections")
         .flag("-fdata-sections")
         .define("NORMALUNIX", None)
@@ -153,6 +166,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed={ENGINE_DIR}");
     println!("cargo:rerun-if-changed={OUR_C_DIR}");
+    println!("cargo:rerun-if-changed={CHOCOLATE_DIR}");
 }
 
 /// The directory holding the `libc.a` that matches [`ARCH_FLAGS`].

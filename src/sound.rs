@@ -90,6 +90,17 @@ pub fn set_output_rate(hz: u32) {
     OUTPUT_RATE.store(hz, Ordering::Relaxed);
 }
 
+/// The rate core 1 plays at, as [`set_output_rate`] recorded it.
+pub fn output_rate() -> u32 {
+    OUTPUT_RATE.load(Ordering::Relaxed)
+}
+
+unsafe extern "C" {
+    /// Renders `frames` stereo frames of music, interleaved, from the OPL
+    /// (c/opl_rpi.c). Silence until the music module has started.
+    fn rpi_doom_opl_render(out: *mut i16, frames: u32);
+}
+
 fn channel(index: i32) -> Option<&'static Channel> {
     usize::try_from(index)
         .ok()
@@ -250,9 +261,18 @@ impl Mixer {
             }
         }
 
-        for (frame, sum) in out.iter_mut().zip(sums.iter()) {
-            frame[0] = sum[0].clamp(i16::MIN.into(), i16::MAX.into()) as i16;
-            frame[1] = sum[1].clamp(i16::MIN.into(), i16::MAX.into()) as i16;
+        // Music under the effects, at the level the music module set: its
+        // volume control works on the chip's own registers.
+        let mut music = [[0i16; 2]; 512];
+        let music = &mut music[..out.len()];
+        // Safety: `music` has room for `out.len()` stereo frames.
+        unsafe { rpi_doom_opl_render(music.as_mut_ptr().cast(), music.len() as u32) };
+
+        for ((frame, sum), music) in out.iter_mut().zip(sums.iter()).zip(music.iter()) {
+            let left = sum[0] + i32::from(music[0]);
+            let right = sum[1] + i32::from(music[1]);
+            frame[0] = left.clamp(i16::MIN.into(), i16::MAX.into()) as i16;
+            frame[1] = right.clamp(i16::MIN.into(), i16::MAX.into()) as i16;
         }
     }
 }

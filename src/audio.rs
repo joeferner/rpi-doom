@@ -29,6 +29,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use rpi_hal::dma::Dma;
 use rpi_hal::multicore::{CacheAligned, Core1, Stack};
 use rpi_hal::pwm::{Channel1Pin, Channel2Pin, Pwm, pcm_to_duty};
+use rpi_hal::timer::Timer;
 use rpi_hal::{halt, pac};
 
 use crate::sound::Mixer;
@@ -92,6 +93,49 @@ pub fn chunks() -> u32 {
     CHUNKS.0.load(Ordering::Relaxed)
 }
 
+/// Chunks per window [`fill_times`] reports on: about 5.4 s.
+const WINDOW_CHUNKS: u32 = 1024;
+
+/// The last full window's average and worst time to fill a chunk, in
+/// microseconds. Written only by core 1, once a window.
+static FILL_AVERAGE_US: CacheAligned<AtomicU32> = CacheAligned(AtomicU32::new(0));
+static FILL_WORST_US: CacheAligned<AtomicU32> = CacheAligned(AtomicU32::new(0));
+
+/// The last full window's average and worst time to fill a chunk, and the
+/// budget, all in microseconds. A fill that takes longer than the budget
+/// is a chunk late to the hardware: a gap in the sound.
+pub fn fill_times() -> (u32, u32, u32) {
+    let budget = (CHUNK_FRAMES as u64 * 1_000_000 / u64::from(sample_rate_hz())) as u32;
+    (
+        FILL_AVERAGE_US.0.load(Ordering::Relaxed),
+        FILL_WORST_US.0.load(Ordering::Relaxed),
+        budget,
+    )
+}
+
+/// Core 1's running totals for the current window, kept on its stack.
+#[derive(Default)]
+struct FillClock {
+    total_us: u32,
+    worst_us: u32,
+    chunks: u32,
+}
+
+impl FillClock {
+    fn record(&mut self, took_us: u32) {
+        self.total_us += took_us;
+        self.worst_us = self.worst_us.max(took_us);
+        self.chunks += 1;
+        if self.chunks == WINDOW_CHUNKS {
+            FILL_AVERAGE_US
+                .0
+                .store(self.total_us / WINDOW_CHUNKS, Ordering::Relaxed);
+            FILL_WORST_US.0.store(self.worst_us, Ordering::Relaxed);
+            *self = FillClock::default();
+        }
+    }
+}
+
 /// Starts audio output on core 1.
 ///
 /// Call after the SD card is up: core 1 muxes GPIO40/45 through `GPFSEL4`,
@@ -107,13 +151,15 @@ pub fn start(core1: Core1) {
 
 /// Fills one chunk with [`CHUNK_FRAMES`] interleaved frames from the
 /// mixer.
-fn fill(mixer: &mut Mixer, buf: &mut [u32]) {
+fn fill(mixer: &mut Mixer, clock: &mut FillClock, timer: &Timer, buf: &mut [u32]) {
+    let start = timer.now_micros();
     let mut frames = [[0i16; 2]; CHUNK_FRAMES];
     mixer.mix(&mut frames);
     for (words, frame) in buf.as_chunks_mut::<2>().0.iter_mut().zip(&frames) {
         words[0] = u32::from(pcm_to_duty(frame[0], RANGE));
         words[1] = u32::from(pcm_to_duty(frame[1], RANGE));
     }
+    clock.record((timer.now_micros() - start) as u32);
     CHUNKS.0.store(
         CHUNKS.0.load(Ordering::Relaxed).wrapping_add(1),
         Ordering::Relaxed,
@@ -148,8 +194,12 @@ extern "C" fn worker() -> ! {
     // Both chunks hold real audio before the engine starts: it reads the
     // moment the stream is armed.
     let mut mixer = Mixer::new();
-    fill(&mut mixer, &mut buf0.0);
-    fill(&mut mixer, &mut buf1.0);
+    // For timing fills. The System Timer's counters are read-only and
+    // free-running, so this core reading them disturbs nothing on core 0.
+    let timer = Timer::new(peripherals.SYSTMR);
+    let mut clock = FillClock::default();
+    fill(&mut mixer, &mut clock, &timer, &mut buf0.0);
+    fill(&mut mixer, &mut clock, &timer, &mut buf1.0);
 
     let mut dma = Dma::new();
     // Parking is the right failure for both of these: the game runs on
@@ -167,7 +217,7 @@ extern "C" fn worker() -> ! {
 
     loop {
         // Blocks until the engine is done with the chunk being refilled.
-        stream.feed(|buf| fill(&mut mixer, buf));
+        stream.feed(|buf| fill(&mut mixer, &mut clock, &timer, buf));
         // A channel that flagged an error has stopped, and a stopped
         // channel is what paces this loop, so carrying on would spin.
         if stream.is_error() {

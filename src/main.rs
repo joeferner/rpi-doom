@@ -14,7 +14,9 @@ extern crate alloc;
 mod audio;
 mod files;
 mod input;
+mod music;
 mod newlib;
+mod opl3;
 mod platform;
 mod sound;
 
@@ -23,7 +25,7 @@ use core::fmt::Write;
 
 use alloc::boxed::Box;
 use alloc::vec;
-use rpi_hal::mailbox::{Mailbox, PixelOrder};
+use rpi_hal::mailbox::{ClockId, Mailbox, PixelOrder};
 use rpi_hal::sd::{Sd, SdBlockDevice};
 use rpi_hal::{halt, pac, timer::Timer, uart::Uart};
 use rpi_kickstart::{console, heap, logln, storage};
@@ -41,6 +43,9 @@ static TIMER: StaticCell<Timer> = StaticCell::new();
 /// Rust heap. Doom's zone allocator asks for 6 MiB of it up front; the
 /// rest is newlib's own buffers and the engine's smaller allocations.
 const C_HEAP_BYTES: usize = 32 * 1024 * 1024;
+
+/// How often the main loop logs core 1's chunk fill times.
+const AUDIO_REPORT_US: u64 = 30_000_000;
 
 unsafe extern "C" {
     /// Starts the engine: parses `argv`, finds and loads the WAD, and
@@ -83,6 +88,19 @@ pub extern "C" fn kmain() -> ! {
     logln!("rpi-doom: hello from the Raspberry Pi 2 (B)");
 
     let mut mailbox = Mailbox::new(peripherals.VCMAILBOX);
+
+    // The firmware starts the ARM at its minimum (600 MHz here) and leaves
+    // it there until asked: under Linux the cpufreq governor asks. Without
+    // this the game and core 1's music both run at two-thirds speed, and
+    // nothing reports it (the throttle flags stay clear).
+    match mailbox.max_clock_rate_hz(ClockId::Arm) {
+        Ok(max) => match mailbox.set_clock_rate_hz(ClockId::Arm, max) {
+            Ok(now) => logln!("arm: {} MHz", now / 1_000_000),
+            Err(e) => logln!("arm: couldn't raise the clock ({e:?})"),
+        },
+        Err(e) => logln!("arm: no maximum clock rate ({e:?})"),
+    }
+
     match heap::init(&mut mailbox) {
         Ok(bytes) => logln!("heap: {} MiB", bytes / (1024 * 1024)),
         Err(e) => {
@@ -173,8 +191,16 @@ pub extern "C" fn kmain() -> ! {
         // Through startup, including the WAD load: a count well short of
         // the uptime's worth of chunks means the stream stopped.
         logln!("audio: {} chunks played", audio::chunks());
+        let mut next_report = timer.now_micros();
         loop {
             doomgeneric_Tick();
+            // How much of core 1's time a chunk takes, now music and
+            // effects share it. A worst over the budget is an audible gap.
+            if timer.now_micros() >= next_report {
+                next_report += AUDIO_REPORT_US;
+                let (average, worst, budget) = audio::fill_times();
+                logln!("audio: chunk fill average {average} us, worst {worst} us, of {budget} us");
+            }
         }
     }
 }
