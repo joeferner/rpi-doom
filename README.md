@@ -26,9 +26,6 @@ Rust port of the Nuked OPL3 emulator (`src/opl3.rs`).
   library.
 - Rust via [rustup](https://rustup.rs). `rust-toolchain.toml` installs
   the right toolchain and target on first build.
-- For now, a checkout of [rpi-hal](https://github.com/joeferner/rpi-hal)
-  beside this one (`../rpi-hal`): `Cargo.toml` patches it in for a
-  multicore fix that isn't released yet.
 - `cargo install cargo-binutils rpi-loader`: `cargo objcopy` turns the
   build into the raw image the firmware loads, and `rpi-loader` uploads
   it to the board.

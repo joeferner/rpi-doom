@@ -193,7 +193,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-hal"
-version = "0.9.1"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15d1e32ab860f49ee2df7ff11d38a8e49a4df8c833eee837371cbdf0a77833a8"
 dependencies = [
  "bcm2837-lpa",
  "critical-section",
@@ -204,9 +206,9 @@ dependencies = [
 
 [[package]]
 name = "rpi-kickstart"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "785ee7a63afc1294026a27ffb01a67efb31df6979afda87d8f933ad8b58aee49"
+checksum = "2e98c0657bd35a7486a5546c151f779f976e99ba7b0f0e64f03c441c216dd205"
 dependencies = [
  "critical-section",
  "embassy-sync",
