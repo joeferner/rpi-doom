@@ -36,22 +36,36 @@ The game data isn't in this repository: `DOOM.WAD` is commercial. Put a
 WAD (`DOOM.WAD`, `DOOM2.WAD`, or the shareware `DOOM1.WAD`) in a `doom/`
 directory here first; it's ignored by git.
 
+There are two kinds of card. To just play, make one that boots straight
+into the game:
+
 ```sh
-make sd-card
+make sd-card-release
 ```
 
-This fetches the Raspberry Pi boot firmware and the
-[rpi-loader](https://github.com/joeferner/rpi-hal/tree/main/loader) image
-into `sd-card/`, checking each against `sd-card.sha256`, and copies the
-WADs into `sd-card/doom/`. Copy everything in `sd-card/` onto the card's
-boot partition, including `config.txt` and the `doom` directory.
+To work on the code, make one with
+[rpi-loader](https://github.com/joeferner/rpi-hal/tree/main/loader) on
+it instead, so each build goes to the board over the serial cable
+(`make run`, below):
 
-The loader goes on the card as `kernel7.img`, the only filename the
-firmware loads on this board. It stays resident, so after this you never
-have to take the card out again.
+```sh
+make sd-card-dev
+```
 
-To add or replace WADs later without taking the card out, reset the board
-so the loader is running and upload them over the serial cable:
+Each fetches the Raspberry Pi boot firmware (and, for the development
+card, the rpi-loader image), checking each file against
+`sd-card.sha256`, and assembles the card in `target/sd-card-release/` or
+`target/sd-card-dev/`: the firmware, `config.txt`, the kernel as
+`kernel7.img` (the only filename the firmware loads on this board), and
+the WADs in `doom/`. Copy everything in that directory onto the card's
+boot partition.
+
+The loader stays resident, so with a development card you never have to
+take the card out again.
+
+To add or replace WADs later on a development card without taking it
+out, reset the board so the loader is running and upload them over the
+serial cable:
 
 ```sh
 make wads DEVICE=/dev/ttyUSB0
@@ -67,8 +81,9 @@ This builds `target/kernel7.img`, uploads it to the board over the serial
 cable, and boots it. Doom's startup log appears on the same cable, and
 the game on the display.
 
-To boot without the loader, copy `target/kernel7.img` onto the card in
-place of the loader's `kernel7.img`.
+To boot without the loader, make a release card (above), or copy
+`target/kernel7.img` onto the card in place of the loader's
+`kernel7.img`.
 
 ## Controls
 
